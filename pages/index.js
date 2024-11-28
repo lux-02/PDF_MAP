@@ -65,7 +65,7 @@ export default function Home() {
     const { width: pdfWidth, height: pdfHeight } = pdfPage.getSize();
 
     const pdfX = (x / rect.width) * pdfWidth;
-    const pdfY = pdfHeight - (y / rect.height) * pdfHeight;
+    const pdfY = (y / rect.height) * pdfHeight;
     return { x: pdfX, y: pdfY };
   };
 
