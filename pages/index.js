@@ -1,70 +1,112 @@
 import React, { useRef, useState } from "react";
+import * as pdfjsLib from "pdfjs-dist";
+import { PDFDocument } from "pdf-lib";
 import styles from "@/styles/Home.module.css";
 
+pdfjsLib.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.js";
+
 export default function Home() {
-  const [imageUrl, setImageUrl] = useState("");
+  const [pdfDoc, setPdfDoc] = useState(null);
+  const [fileName, setFileName] = useState(""); // 업로드된 파일 이름
+  const [pageNum, setPageNum] = useState(1);
   const [rects, setRects] = useState([]);
+  const [pdfLibDoc, setPdfLibDoc] = useState(null);
+  const [previewRect, setPreviewRect] = useState(null); // 미리보기 사각형
   const containerRef = useRef(null);
+  const canvasRef = useRef(null);
   const [isDrawing, setIsDrawing] = useState(false);
   const [startPos, setStartPos] = useState(null);
-  const [imageSize, setImageSize] = useState({ width: 1, height: 1 }); // 이미지 크기 저장
 
-  const MIN_DRAG_SIZE = 15; // 최소 드래그 크기 (15x15)
+  const MIN_DRAG_SIZE = 15;
 
-  const handleFileChange = (e) => {
+  const handleFileChange = async (e) => {
     const file = e.target.files[0];
-    if (file) {
-      const img = new Image();
-      img.onload = () => {
-        setImageSize({ width: img.naturalWidth, height: img.naturalHeight });
-        setImageUrl(URL.createObjectURL(file));
+    if (file && file.type === "application/pdf") {
+      setFileName(file.name); // 파일 이름 저장
+      const reader = new FileReader();
+      reader.onload = async function () {
+        const typedArray = new Uint8Array(this.result);
+
+        const pdfLibDoc = await PDFDocument.load(typedArray);
+        setPdfLibDoc(pdfLibDoc);
+
+        pdfjsLib.getDocument(typedArray).promise.then((pdf) => {
+          setPdfDoc(pdf);
+          renderPage(1, pdf);
+        });
       };
-      img.src = URL.createObjectURL(file);
+      reader.readAsArrayBuffer(file);
+    } else {
+      alert("Please upload a valid PDF file.");
     }
   };
 
-  const handleMouseDown = (e) => {
-    if (!containerRef.current) return;
+  const renderPage = (num, pdf) => {
+    pdf.getPage(num).then((page) => {
+      const canvas = canvasRef.current;
+      const context = canvas.getContext("2d");
 
-    const rect = containerRef.current.getBoundingClientRect();
+      const viewport = page.getViewport({ scale: 1.5 });
+      canvas.width = viewport.width;
+      canvas.height = viewport.height;
+
+      const renderContext = {
+        canvasContext: context,
+        viewport,
+      };
+
+      page.render(renderContext);
+    });
+  };
+
+  const convertToPdfCoords = (x, y, canvas) => {
+    const rect = canvas.getBoundingClientRect();
+    const pdfPage = pdfLibDoc.getPage(pageNum - 1);
+    const { width: pdfWidth, height: pdfHeight } = pdfPage.getSize();
+
+    const pdfX = (x / rect.width) * pdfWidth;
+    const pdfY = pdfHeight - (y / rect.height) * pdfHeight;
+    return { x: pdfX, y: pdfY };
+  };
+
+  const handleMouseDown = (e) => {
+    if (!canvasRef.current) return;
+
+    const rect = canvasRef.current.getBoundingClientRect();
     setStartPos({ x: e.clientX - rect.left, y: e.clientY - rect.top });
     setIsDrawing(true);
-
-    // Preview rectangle setup
-    const previewDiv = document.createElement("div");
-    previewDiv.id = "preview-rect";
-    previewDiv.style.position = "absolute";
-    previewDiv.style.border = "2px dashed #00f";
-    previewDiv.style.zIndex = "10";
-    containerRef.current.appendChild(previewDiv);
   };
 
   const handleMouseMove = (e) => {
-    if (!isDrawing || !containerRef.current) return;
+    if (!isDrawing || !canvasRef.current) return;
 
-    const rect = containerRef.current.getBoundingClientRect();
+    const rect = canvasRef.current.getBoundingClientRect();
     const currentPos = {
       x: e.clientX - rect.left,
       y: e.clientY - rect.top,
     };
 
-    const width = currentPos.x - startPos.x;
-    const height = currentPos.y - startPos.y;
+    const width = Math.abs(currentPos.x - startPos.x);
+    const height = Math.abs(currentPos.y - startPos.y);
+    const left = Math.min(currentPos.x, startPos.x);
+    const top = Math.min(currentPos.y, startPos.y);
 
-    // Update preview rectangle dynamically
-    const previewRect = document.getElementById("preview-rect");
-    if (previewRect) {
-      previewRect.style.left = `${Math.min(startPos.x, currentPos.x)}px`;
-      previewRect.style.top = `${Math.min(startPos.y, currentPos.y)}px`;
-      previewRect.style.width = `${Math.abs(width)}px`;
-      previewRect.style.height = `${Math.abs(height)}px`;
-    }
+    setPreviewRect({
+      x: left,
+      y: top,
+      width,
+      height,
+    });
   };
 
   const handleMouseUp = (e) => {
-    if (!isDrawing || !containerRef.current) return;
+    if (!isDrawing || !canvasRef.current || !pdfLibDoc) {
+      setPreviewRect(null);
+      return;
+    }
 
-    const rect = containerRef.current.getBoundingClientRect();
+    const canvas = canvasRef.current;
+    const rect = canvas.getBoundingClientRect();
     const endPos = {
       x: e.clientX - rect.left,
       y: e.clientY - rect.top,
@@ -73,111 +115,110 @@ export default function Home() {
     const width = Math.abs(endPos.x - startPos.x);
     const height = Math.abs(endPos.y - startPos.y);
 
-    // Check minimum drag size
     if (width >= MIN_DRAG_SIZE && height >= MIN_DRAG_SIZE) {
-      // A4 크기 기준으로 좌표 변환
-      const A4_WIDTH = 595; // PDFKit A4 Width
-      const A4_HEIGHT = 842; // PDFKit A4 Height
+      const pdfStart = convertToPdfCoords(startPos.x, startPos.y, canvas);
+      const pdfEnd = convertToPdfCoords(endPos.x, endPos.y, canvas);
 
       const newRect = {
-        x: (Math.min(startPos.x, endPos.x) / rect.width) * A4_WIDTH,
-        y: (Math.min(startPos.y, endPos.y) / rect.height) * A4_HEIGHT,
-        width: (width / rect.width) * A4_WIDTH,
-        height: (height / rect.height) * A4_HEIGHT,
+        x: Math.min(pdfStart.x, pdfEnd.x),
+        y: Math.min(pdfStart.y, pdfEnd.y),
+        width: Math.abs(pdfEnd.x - pdfStart.x),
+        height: Math.abs(pdfEnd.y - pdfStart.y),
+        canvasX: Math.min(startPos.x, endPos.x),
+        canvasY: Math.min(startPos.y, endPos.y),
+        canvasWidth: width,
+        canvasHeight: height,
         id: Date.now(),
       };
 
       setRects((prevRects) => [...prevRects, newRect]);
     }
 
+    setPreviewRect(null);
     setIsDrawing(false);
-
-    // Remove preview rectangle
-    const previewRect = document.getElementById("preview-rect");
-    if (previewRect) {
-      previewRect.remove();
-    }
   };
 
-  const handleRectDelete = (e, id) => {
-    e.stopPropagation(); // Prevent triggering the parent click event
+  const handleRectDelete = (id) => {
     setRects((prevRects) => prevRects.filter((rect) => rect.id !== id));
   };
 
   return (
     <div className={styles.container}>
-      <h1 className={styles.title}>Image Annotation Tool</h1>
-      <input type="file" accept="image/*" onChange={handleFileChange} />
-      {imageUrl && (
-        <div
-          ref={containerRef}
-          className={styles.imageContainer}
-          onMouseDown={handleMouseDown}
-          onMouseMove={handleMouseMove}
-          onMouseUp={handleMouseUp}
-          style={{
-            position: "relative",
-            display: "inline-block",
-            width: "100%",
-            maxWidth: "100%",
-          }}
-        >
-          <img
-            src={imageUrl}
-            alt="Uploaded"
+      <div className={styles.uploadSection}>
+        <label htmlFor="fileInput" className={styles.uploadButton}>
+          {fileName ? "Change PDF" : "Upload PDF"}
+        </label>
+        <input
+          id="fileInput"
+          type="file"
+          accept="application/pdf"
+          onChange={handleFileChange}
+          className={styles.fileInput}
+        />
+        {fileName && <p className={styles.fileName}>File: {fileName}</p>}
+      </div>
+      <div
+        ref={containerRef}
+        style={{
+          position: "relative",
+          display: "inline-block",
+          marginTop: "20px",
+        }}
+        onMouseDown={handleMouseDown}
+        onMouseMove={handleMouseMove}
+        onMouseUp={handleMouseUp}
+      >
+        <canvas
+          ref={canvasRef}
+          className={styles.pdfCanvas}
+          style={{ border: "1px solid #000" }}
+        ></canvas>
+        {previewRect && (
+          <div
             style={{
-              maxWidth: "100%",
-              height: "auto",
+              position: "absolute",
+              left: `${previewRect.x}px`,
+              top: `${previewRect.y}px`,
+              width: `${previewRect.width}px`,
+              height: `${previewRect.height}px`,
+              border: "2px dashed blue",
+              boxSizing: "border-box",
             }}
-          />
-          {rects.map((rect) => (
-            <div
-              key={rect.id}
-              className={styles.rectOverlay}
-              style={{
-                position: "absolute",
-                left: `${(rect.x / 595) * 100}%`,
-                top: `${(rect.y / 842) * 100}%`,
-                width: `${(rect.width / 595) * 100}%`,
-                height: `${(rect.height / 842) * 100}%`,
-                border: "2px solid red",
-                boxSizing: "border-box",
-              }}
+          ></div>
+        )}
+        {rects.map((rect) => (
+          <div
+            key={rect.id}
+            style={{
+              position: "absolute",
+              left: `${rect.canvasX}px`,
+              top: `${rect.canvasY}px`,
+              width: `${rect.canvasWidth}px`,
+              height: `${rect.canvasHeight}px`,
+              border: "2px solid red",
+              boxSizing: "border-box",
+            }}
+          >
+            <button
+              onClick={() => handleRectDelete(rect.id)}
+              className={styles.deleteRectButton}
             >
-              <button
-                className={styles.deleteRectButton}
-                onClick={(e) => handleRectDelete(e, rect.id)}
-                style={{
-                  position: "absolute",
-                  top: "-10px",
-                  right: "-10px",
-                  background: "red",
-                  color: "white",
-                  border: "none",
-                  borderRadius: "50%",
-                  width: "20px",
-                  height: "20px",
-                  cursor: "pointer",
-                }}
-              >
-                X
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
-      <h2 className={styles.subtitle}>Rectangles:</h2>
-      <ul className={styles.rectList}>
-        {rects.map((rect, index) => (
-          <li key={rect.id} className={styles.rectItem}>
-            <span>Rectangle {index + 1}:</span>
-            <span>
-              X: {rect.x.toFixed(2)}, Y: {rect.y.toFixed(2)}, Width:{" "}
-              {rect.width.toFixed(2)}, Height: {rect.height.toFixed(2)}
-            </span>
-          </li>
+              X
+            </button>
+          </div>
         ))}
-      </ul>
+      </div>
+      <div>
+        <ul className={styles.rectList}>
+          {rects.map((rect, index) => (
+            <li key={rect.id} className={styles.rectItem}>
+              Rectangle {index + 1}: X: {rect.x.toFixed(2)}, Y:{" "}
+              {rect.y.toFixed(2)}, Width: {rect.width.toFixed(2)}, Height:{" "}
+              {rect.height.toFixed(2)}
+            </li>
+          ))}
+        </ul>
+      </div>
     </div>
   );
 }
