@@ -1,21 +1,25 @@
 import React, { useRef, useState } from "react";
-import { Worker, Viewer } from "@react-pdf-viewer/core";
-import "@react-pdf-viewer/core/lib/styles/index.css";
 import styles from "@/styles/Home.module.css";
 
 export default function Home() {
-  const [pdfUrl, setPdfUrl] = useState("");
+  const [imageUrl, setImageUrl] = useState("");
   const [rects, setRects] = useState([]);
   const containerRef = useRef(null);
   const [isDrawing, setIsDrawing] = useState(false);
   const [startPos, setStartPos] = useState(null);
+  const [imageSize, setImageSize] = useState({ width: 1, height: 1 }); // 이미지 크기 저장
 
   const MIN_DRAG_SIZE = 15; // 최소 드래그 크기 (15x15)
 
   const handleFileChange = (e) => {
     const file = e.target.files[0];
     if (file) {
-      setPdfUrl(URL.createObjectURL(file));
+      const img = new Image();
+      img.onload = () => {
+        setImageSize({ width: img.naturalWidth, height: img.naturalHeight });
+        setImageUrl(URL.createObjectURL(file));
+      };
+      img.src = URL.createObjectURL(file);
     }
   };
 
@@ -71,11 +75,11 @@ export default function Home() {
 
     // Check minimum drag size
     if (width >= MIN_DRAG_SIZE && height >= MIN_DRAG_SIZE) {
-      const A4_WIDTH = 595; // A4 width in points
-      const A4_HEIGHT = 842; // A4 height in points
+      // A4 크기 기준으로 좌표 변환
+      const A4_WIDTH = 595; // PDFKit A4 Width
+      const A4_HEIGHT = 842; // PDFKit A4 Height
 
       const newRect = {
-        // Calculate based on A4 proportions
         x: (Math.min(startPos.x, endPos.x) / rect.width) * A4_WIDTH,
         y: (Math.min(startPos.y, endPos.y) / rect.height) * A4_HEIGHT,
         width: (width / rect.width) * A4_WIDTH,
@@ -102,33 +106,59 @@ export default function Home() {
 
   return (
     <div className={styles.container}>
-      <h1 className={styles.title}>PDF Annotation Tool</h1>
-      <input type="file" accept="application/pdf" onChange={handleFileChange} />
-      {pdfUrl && (
+      <h1 className={styles.title}>Image Annotation Tool</h1>
+      <input type="file" accept="image/*" onChange={handleFileChange} />
+      {imageUrl && (
         <div
           ref={containerRef}
-          className={styles.pdfContainer}
+          className={styles.imageContainer}
           onMouseDown={handleMouseDown}
           onMouseMove={handleMouseMove}
           onMouseUp={handleMouseUp}
+          style={{
+            position: "relative",
+            display: "inline-block",
+            width: "100%",
+            maxWidth: "100%",
+          }}
         >
-          <Worker workerUrl="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js">
-            <Viewer fileUrl={pdfUrl} />
-          </Worker>
+          <img
+            src={imageUrl}
+            alt="Uploaded"
+            style={{
+              maxWidth: "100%",
+              height: "auto",
+            }}
+          />
           {rects.map((rect) => (
             <div
               key={rect.id}
               className={styles.rectOverlay}
               style={{
+                position: "absolute",
                 left: `${(rect.x / 595) * 100}%`,
                 top: `${(rect.y / 842) * 100}%`,
                 width: `${(rect.width / 595) * 100}%`,
                 height: `${(rect.height / 842) * 100}%`,
+                border: "2px solid red",
+                boxSizing: "border-box",
               }}
             >
               <button
                 className={styles.deleteRectButton}
                 onClick={(e) => handleRectDelete(e, rect.id)}
+                style={{
+                  position: "absolute",
+                  top: "-10px",
+                  right: "-10px",
+                  background: "red",
+                  color: "white",
+                  border: "none",
+                  borderRadius: "50%",
+                  width: "20px",
+                  height: "20px",
+                  cursor: "pointer",
+                }}
               >
                 X
               </button>
@@ -142,7 +172,8 @@ export default function Home() {
           <li key={rect.id} className={styles.rectItem}>
             <span>Rectangle {index + 1}:</span>
             <span>
-              X: {rect.x.toFixed(2)}, Y: {(rect.y + 150).toFixed(2)}
+              X: {rect.x.toFixed(2)}, Y: {rect.y.toFixed(2)}, Width:{" "}
+              {rect.width.toFixed(2)}, Height: {rect.height.toFixed(2)}
             </span>
           </li>
         ))}
