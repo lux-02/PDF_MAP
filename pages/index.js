@@ -212,9 +212,8 @@ export default function Home() {
         <ul className={styles.rectList}>
           {rects.map((rect, index) => (
             <li key={rect.id} className={styles.rectItem}>
-              Rectangle {index + 1}: X: {rect.x.toFixed(2)}, Y:{" "}
-              {rect.y.toFixed(2)}, Width: {rect.width.toFixed(2)}, Height:{" "}
-              {rect.height.toFixed(2)}
+              Rectangle {index + 1}: X: {(rect.x + 10).toFixed(2)}, Y:
+              {(rect.y + 10).toFixed(2)}
             </li>
           ))}
         </ul>
