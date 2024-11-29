@@ -65,7 +65,8 @@ export default function Home() {
     const { width: pdfWidth, height: pdfHeight } = pdfPage.getSize();
 
     const pdfX = (x / rect.width) * pdfWidth;
-    const pdfY = (y / rect.height) * pdfHeight;
+    const pdfY = pdfHeight - (y / rect.height) * pdfHeight; // Y 좌표 변환
+
     return { x: pdfX, y: pdfY };
   };
 
@@ -119,9 +120,10 @@ export default function Home() {
       const pdfStart = convertToPdfCoords(startPos.x, startPos.y, canvas);
       const pdfEnd = convertToPdfCoords(endPos.x, endPos.y, canvas);
 
+      // PDF 좌표계에서 왼쪽 상단 꼭지점 계산
       const newRect = {
-        x: Math.min(pdfStart.x, pdfEnd.x),
-        y: Math.min(pdfStart.y, pdfEnd.y),
+        x: Math.min(pdfStart.x, pdfEnd.x), // X 좌표는 최소값
+        y: Math.max(pdfStart.y, pdfEnd.y), // PDF 좌표계에서 상단 기준 (최대 Y 값)
         width: Math.abs(pdfEnd.x - pdfStart.x),
         height: Math.abs(pdfEnd.y - pdfStart.y),
         canvasX: Math.min(startPos.x, endPos.x),
